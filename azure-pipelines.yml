@@ -1,34 +1,81 @@
-# ASP.NET Core (.NET Framework)
-# Build and test ASP.NET Core projects targeting the full .NET Framework.
-# Add steps that publish symbols, save build artifacts, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
-
+# Node.js Express Web App to Linux on Azure
+# Build a Node.js Express app and deploy it to Azure as a Linux web app.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+ 
 trigger:
 - master
-
-pool:
-  vmImage: 'windows-latest'
-
+ 
 variables:
-  solution: '**/*.sln'
-  buildPlatform: 'Any CPU'
-  buildConfiguration: 'Release'
-
-steps:
-- task: NuGetToolInstaller@1
-
-- task: NuGetCommand@2
-  inputs:
-    restoreSolution: '$(solution)'
-
-- task: VSBuild@1
-  inputs:
-    solution: '$(solution)'
-    msbuildArgs: '/p:DeployOnBuild=true /p:WebPublishMethod=Package /p:PackageAsSingleFile=true /p:SkipInvalidConfigurations=true /p:DesktopBuildPackageLocation="$(build.artifactStagingDirectory)\WebApp.zip" /p:DeployIisAppPath="Default Web Site"'
-    platform: '$(buildPlatform)'
-    configuration: '$(buildConfiguration)'
-
-- task: VSTest@2
-  inputs:
-    platform: '$(buildPlatform)'
-    configuration: '$(buildConfiguration)'
+ 
+  # Azure Resource Manager connection created during pipeline creation
+  azureSubscription: 'WebAppConnection'
+  
+  # Web app name
+  webAppName: 'test-app-lh'
+  
+  # Resource group
+  resourceGroupName: 'group1'
+ 
+  # Environment name
+  environmentName: 'test-app-lh'
+ 
+  # Agent VM image name
+  vmImageName: 'windows-latest'
+  
+stages:
+- stage: Archive
+  displayName: Archive stage
+  jobs:  
+  - job: Archive
+    displayName: Archive
+    pool:
+      vmImage: $(vmImageName)
+    steps:   
+    - task: AzureAppServiceSettings@1
+      inputs:
+        azureSubscription: $(azureSubscription)
+        appName: $(webAppName)
+        resourceGroupName: $(resourceGroupName)
+        appSettings: |
+          [
+            {
+              "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+              "value": "true"
+            }
+          ]
+    - task: ArchiveFiles@2
+      displayName: 'Archive files'
+      inputs:
+        rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+        replaceExistingArchive: true
+ 
+    - upload: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+      artifact: drop
+ 
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: Archive
+  condition: succeeded()
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    environment: $(environmentName)
+    pool: 
+      vmImage: $(vmImageName)
+    strategy:
+      runOnce:
+        deploy:
+          steps:            
+          - task: AzureWebApp@1
+            displayName: 'Azure Web App Deploy: Matt-Test-NodeJS-Deploy'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              appType: webAppLinux
+              appName: $(webAppName)
+              runtimeStack: 'NODE|10.14'
+              package: $(Pipeline.Workspace)/drop/$(Build.BuildId).zip
+ 
